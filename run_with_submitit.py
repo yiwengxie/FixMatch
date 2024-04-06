@@ -12,13 +12,13 @@ from config.config import get_config
 
 def parse_args():
     classification_parser = get_config()
-    parser = argparse.ArgumentParser("Submitit for FixMatch", parents=[classification_parser], add_help=False)
+    parser = argparse.ArgumentParser("Submitit for FixMatch", parents=[classification_parser])
     parser.add_argument("--ngpus", default=1, type=int, help="Number of gpus to request on each node")
     parser.add_argument("--nodes", default=1, type=int, help="Number of nodes to request")
     parser.add_argument("--timeout", default=2800, type=int, help="Duration of the job(mins)")
     parser.add_argument("--job_dir", default="", type=str, help="Job dir. Leave empty for automatic.")
     parser.add_argument("--partition", default="fvl", type=str, help="Partition where to submit")
-    parser.add_argument("--qos", default="high", type=str, help="Partition where to submit")
+    parser.add_argument("--qos", default="default", type=str, help="Partition where to submit")
     parser.add_argument("--use_volta32", action='store_true', help="Big models? Use this")
     parser.add_argument('--comment', default="", type=str, help='Comment to pass to scheduler, e.g. priority message')
 

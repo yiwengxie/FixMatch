@@ -97,7 +97,7 @@ def get_flowers102(args, root):
         transforms.ToTensor(),
         transforms.Normalize(mean=normal_mean, std=normal_std)
     ])
-    base_dataset = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers_small", drop_labels=False )
+    base_dataset = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers", drop_labels=False )
     base_dataset_train = base_dataset['train']
     base_dataset_test = base_dataset['train']
     train_labeled_idxs, train_unlabeled_idxs = x_u_split(args, base_dataset_train['label'])

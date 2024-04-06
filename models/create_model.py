@@ -1,6 +1,9 @@
 import torch.nn as nn
+import logging
 
-def create_model(args, log):
+logger = logging.getLogger(__name__)
+
+def create_model(args):
     if args.arch == 'wideresnet':
         import models.wideresnet as models
         model = models.build_wideresnet(depth=args.model_depth,
@@ -13,6 +16,6 @@ def create_model(args, log):
                                         depth=args.model_depth,
                                         width=args.model_width,
                                         num_classes=args.num_classes)
-    log("Total params: {:.2f}M".format(
+    logger.info("Total params: {:.2f}M".format(
         sum(p.numel() for p in model.parameters())/1e6))
     return model

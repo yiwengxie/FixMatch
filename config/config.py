@@ -6,7 +6,7 @@ from utils.seed_utils import set_seed
 from torch.utils.tensorboard import SummaryWriter
 
 def get_config():
-    parser = argparse.ArgumentParser(description='PyTorch FixMatch Training')
+    parser = argparse.ArgumentParser(description='PyTorch FixMatch Training', add_help=False)
     parser.add_argument('--gpu-id', default='0', type=int, help='id(s) for CUDA_VISIBLE_DEVICES')
     parser.add_argument('--num-workers', type=int, default=4, help='number of workers')
     parser.add_argument('--dataset', default='flowers102', type=str, choices=['cifar10', 'cifar100', 'flowers102'], help='dataset name')
@@ -16,7 +16,7 @@ def get_config():
     parser.add_argument('--total-steps', default=10000, type=int, help='number of total steps to run')
     parser.add_argument('--eval-step', default=1024, type=int, help='number of eval steps to run')
     parser.add_argument('--start-epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
-    parser.add_argument('--batch-size', default=4, type=int, help='train batchsize')
+    parser.add_argument('--batch-size', default=1, type=int, help='train batchsize')
     parser.add_argument('--lr', '--learning-rate', default=0.03, type=float, help='initial learning rate')
     parser.add_argument('--warmup', default=0, type=float, help='warmup epochs (unlabeled data based)')
     parser.add_argument('--wdecay', default=5e-4, type=float, help='weight decay')
