@@ -8,15 +8,16 @@ from torch.utils.tensorboard import SummaryWriter
 def get_config():
     parser = argparse.ArgumentParser(description='PyTorch FixMatch Training', add_help=False)
     parser.add_argument('--gpu-id', default='0', type=int, help='id(s) for CUDA_VISIBLE_DEVICES')
+    parser.add_argument('--device', default='cuda', help='device to use for training / testing')
     parser.add_argument('--num-workers', type=int, default=4, help='number of workers')
     parser.add_argument('--dataset', default='flowers102', type=str, choices=['cifar10', 'cifar100', 'flowers102'], help='dataset name')
-    parser.add_argument('--num-labeled', type=int, default=204, help='number of labeled data')
+    parser.add_argument('--num-labeled', type=int, default=816, help='number of labeled data')
     parser.add_argument("--expand-labels", action="store_true", help="expand labels to fit eval steps")
     parser.add_argument('--arch', default='wideresnet', type=str, choices=['wideresnet', 'resnext'], help='dataset name')
-    parser.add_argument('--total-steps', default=10000, type=int, help='number of total steps to run')
+    parser.add_argument('--total-steps', default=60000, type=int, help='number of total steps to run')
     parser.add_argument('--eval-step', default=1024, type=int, help='number of eval steps to run')
     parser.add_argument('--start-epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
-    parser.add_argument('--batch-size', default=1, type=int, help='train batchsize')
+    parser.add_argument('--batch-size', default=32, type=int, help='train batchsize')
     parser.add_argument('--lr', '--learning-rate', default=0.03, type=float, help='initial learning rate')
     parser.add_argument('--warmup', default=0, type=float, help='warmup epochs (unlabeled data based)')
     parser.add_argument('--wdecay', default=5e-4, type=float, help='weight decay')
@@ -32,30 +33,25 @@ def get_config():
     parser.add_argument('--seed', default=None, type=int, help="random seed")
     parser.add_argument("--amp", action="store_true", help="use 16-bit (mixed) precision through NVIDIA apex AMP")
     parser.add_argument("--opt_level", type=str, default="O1", help="apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']." "See details at https://nvidia.github.io/apex/amp.html")
-    parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
+    parser.add_argument('--dist-eval', action='store_true', default=False, help='Enabling distributed evaluation')
+    parser.add_argument("--local_rank", type=int, default=os.getenv('LOCAL_RANK', -1), help="For distributed training: local_rank")
     parser.add_argument('--no-progress', action='store_true', help="don't use progress bar")
+    parser.add_argument('--repeated-aug', action='store_true')
+    parser.add_argument('--no-repeated-aug', action='store_false', dest='repeated_aug')
+    parser.set_defaults(repeated_aug=True)
+    # wwwwwwwwwc 这sb东西不能要
+    # parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')
+    parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
 
     return parser
 
 def check_args(args):
-    if args.local_rank == -1:
-        device = torch.device('cuda', args.gpu_id)
-        args.world_size = 1
-        args.n_gpu = torch.cuda.device_count()
-    else:
-        torch.cuda.set_device(args.local_rank)
-        device = torch.device('cuda', args.local_rank)
-        torch.distributed.init_process_group(backend='nccl')
-        args.world_size = torch.distributed.get_world_size()
-        args.n_gpu = 1
-    args.device = device
-
     if args.seed is not None:
         set_seed(args)
 
-    if args.local_rank in [-1, 0]:
-        os.makedirs(args.out, exist_ok=True)
-        args.writer = SummaryWriter(args.out)
+    # if (args.distributed == False) or (args.rank == 0):
+    os.makedirs(args.out, exist_ok=True)
+    args.writer = SummaryWriter(args.out)
 
     if args.dataset == 'cifar10':
         args.num_classes = 10
@@ -87,13 +83,15 @@ def check_args(args):
             args.model_depth = 29
             args.model_width = 64
 
-    if args.local_rank not in [-1, 0]:
+    # 罪魁祸首！！！！！！！！！！！！！！ 我草泥马你他妈能写出这种代码？？？？？？？？？？？？？？？？？？？？
+    # if (args.distributed == True) and (args.rank != 0):
+    if args.distributed == True:
         torch.distributed.barrier()
 
-    return args
+    return
 
 
-def load_and_initialize_model(args, model, optimizer, scheduler):
+def load_and_initialize_model(args, model, optimizer, scheduler, best_acc):
     # Calculate epochs based on total_steps and eval_step
     args.epochs = math.ceil(args.total_steps / args.eval_step)
     
@@ -123,12 +121,7 @@ def load_and_initialize_model(args, model, optimizer, scheduler):
     if args.amp:
         from apex import amp
         model, optimizer = amp.initialize(model, optimizer, opt_level=args.opt_level)
+
     
-    # Distributed training initialization
-    if args.local_rank != -1:
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[args.local_rank],
-            output_device=args.local_rank, find_unused_parameters=True)
-    
-    return model, optimizer, scheduler, ema_model
+    return model, optimizer, scheduler, ema_model, best_acc
 

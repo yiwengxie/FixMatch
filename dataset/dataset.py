@@ -82,6 +82,7 @@ def get_cifar100(args, root):
 
 
 def get_flowers102(args, root):
+    # 128*4 
     size = 256
     transform_labeled = transforms.Compose([
         transforms.Resize((size, size)), 

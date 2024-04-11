@@ -1,5 +1,6 @@
 import torch.nn as nn
 import logging
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -18,4 +19,15 @@ def create_model(args):
                                         num_classes=args.num_classes)
     logger.info("Total params: {:.2f}M".format(
         sum(p.numel() for p in model.parameters())/1e6))
+    
+    device = torch.device(args.device, args.gpu)
+    print(device)
+    model.to(device)
+    print(f"device:", device, "before:", model)
+    if args.distributed:
+        torch.distributed.barrier()
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], output_device=args.gpu, find_unused_parameters=True)
+
+    
+
     return model

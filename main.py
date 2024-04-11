@@ -1,21 +1,23 @@
 import logging
 import time
-import functools
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from dataset.dataset import DATASET_GETTERS
 from models.create_model import create_model
-
+from utils.samplers import RASampler
 from utils.metrics import accuracy
 from utils.average_meter import AverageMeter
 from utils.checkpoint_utils import save_checkpoint
 from utils.lr_scheduler import get_cosine_schedule_with_warmup
 from utils.tensor_utils import interleave, de_interleave
+from utils.distributed_utils import init_distributed_mode
 from config.config import check_args, load_and_initialize_model
+import utils.distributed_utils
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +29,8 @@ def initialize_logging(args):
     logger.warning(
         f"Process rank: {args.local_rank}, "
         f"device: {args.device}, "
-        f"n_gpu: {args.n_gpu}, "
-        f"distributed training: {bool(args.local_rank != -1)}, "
+        f"n_gpu: {args.gpu}, "
+        f"distributed training: {args.distributed}, "
         f"16-bits training: {args.amp}")
     logger.info(dict(args._get_kwargs()))
 
@@ -37,25 +39,54 @@ def load_datasets(args):
     return labeled_dataset, unlabeled_dataset, test_dataset
 
 def create_data_loaders(args, labeled_dataset, unlabeled_dataset, test_dataset):
-    train_sampler = RandomSampler if args.local_rank == -1 else DistributedSampler
-
+    if args.distributed:
+        num_tasks = utils.distributed_utils.get_world_size()
+        global_rank = utils.distributed_utils.get_rank()
+        if args.repeated_aug:
+            sampler_train_labeled = RASampler(
+                labeled_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
+            )
+            sampler_train_unlabeled = RASampler(
+                unlabeled_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
+            )
+        else:
+            sampler_train_labeled = torch.utils.data.DistributedSampler(
+                labeled_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
+            )
+            sampler_train_unlabeled = torch.utils.data.DistributedSampler(
+                unlabeled_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
+            )
+        if args.dist_eval:
+            if len(test_dataset) % num_tasks != 0:
+                print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
+                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
+                      'equal num of samples per-process.')
+            sampler_test = torch.utils.data.DistributedSampler(
+                test_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=False)
+        else:
+            sampler_test = torch.utils.data.SequentialSampler(test_dataset)
+    else:
+        sampler_train_labeled = torch.utils.data.RandomSampler(labeled_dataset)
+        sampler_train_unlabeled = torch.utils.data.RandomSampler(unlabeled_dataset)
+        sampler_test = torch.utils.data.SequentialSampler(test_dataset)
+    
     labeled_trainloader = DataLoader(
         labeled_dataset,
-        sampler=train_sampler(labeled_dataset),
+        sampler=sampler_train_labeled,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         drop_last=True)
 
     unlabeled_trainloader = DataLoader(
         unlabeled_dataset,
-        sampler=train_sampler(unlabeled_dataset),
+        sampler=sampler_train_unlabeled,
         batch_size=args.batch_size*args.mu,
         num_workers=args.num_workers,
         drop_last=True)
 
     test_loader = DataLoader(
         test_dataset,
-        sampler=SequentialSampler(test_dataset),
+        sampler=sampler_test,
         batch_size=args.batch_size,
         num_workers=args.num_workers)
 
@@ -74,14 +105,13 @@ def create_optimizer(args, model):
     return optimizer
 
 def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
-          model, optimizer, ema_model, scheduler):
+          model, optimizer, ema_model, scheduler, best_acc):
     if args.amp:
         from apex import amp
-    best_acc = 0
     test_accs = []
     end = time.time()
 
-    if args.world_size > 1:
+    if args.distributed:
         labeled_epoch = 0
         unlabeled_epoch = 0
         labeled_trainloader.sampler.set_epoch(labeled_epoch)
@@ -100,7 +130,7 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
         mask_probs = AverageMeter()
         if not args.no_progress:
             p_bar = tqdm(range(args.eval_step),
-                         disable=args.local_rank not in [-1, 0])
+                         disable=args.distributed and args.rank != 0)
         for batch_idx in range(args.eval_step):
             try:
                 inputs_x, targets_x = next(iter(labeled_iter))
@@ -110,8 +140,9 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
                     labeled_trainloader.sampler.set_epoch(labeled_epoch)
                 labeled_iter = iter(labeled_trainloader)
                 inputs_x, targets_x = next(iter(labeled_iter))
-
+            print('targets_x:', targets_x)
             try:
+                # week and strong
                 (inputs_u_w, inputs_u_s), _ = next(iter(unlabeled_iter))
             except:
                 if args.world_size > 1:
@@ -122,6 +153,7 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
 
             data_time.update(time.time() - end)
             batch_size = inputs_x.shape[0]
+            # ？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？
             inputs = interleave(
                 torch.cat((inputs_x, inputs_u_w, inputs_u_s)), 2*args.mu+1).to(args.device)
             targets_x = targets_x.to(args.device)
@@ -183,7 +215,7 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
         else:
             test_model = model
 
-        if args.local_rank in [-1, 0]:
+        if args.distributed == False or args.rank == 0:
             test_loss, test_acc = test(args, test_loader, test_model, epoch)
 
             args.writer.add_scalar('train/1.train_loss', losses.avg, epoch)
@@ -215,7 +247,7 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
             logger.info('Mean top-1 acc: {:.2f}\n'.format(
                 np.mean(test_accs[-20:])))
 
-    if args.local_rank in [-1, 0]:
+    if args.distributed == False or args.rank == 0:
         args.writer.close()
 
 
@@ -228,7 +260,7 @@ def test(args, test_loader, model, epoch):
     end = time.time()
 
     if not args.no_progress:
-        test_loader = tqdm(test_loader, disable=args.local_rank not in [-1, 0])
+        test_loader = tqdm(test_loader, disable=args.distributed == True and args.rank != 0)
 
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(test_loader):
@@ -264,29 +296,27 @@ def test(args, test_loader, model, epoch):
     return losses.avg, top1.avg
 
 def main(args):
-    args = check_args(args)
+    init_distributed_mode(args)
+    check_args(args)
     initialize_logging(args)
+    model = create_model(args)
     labeled_dataset, unlabeled_dataset, test_dataset = load_datasets(args)
     labeled_trainloader, unlabeled_trainloader, test_loader = create_data_loaders(args, labeled_dataset, unlabeled_dataset, test_dataset)
-    
-    model = create_model(args)
-    model.to(args.device)
-
     optimizer = create_optimizer(args, model)
     scheduler = get_cosine_schedule_with_warmup(optimizer, args.warmup, args.total_steps)
-
-    model, optimizer, scheduler, ema_model = load_and_initialize_model(args, model, optimizer, scheduler)
+    best_acc = 0
+    model, optimizer, scheduler, ema_model, best_acc = load_and_initialize_model(args, model, optimizer, scheduler, best_acc)
 
     logger.info("****************** Running training ******************")
     logger.info(f"  Task = {args.dataset}@{args.num_labeled}")
     logger.info(f"  Num Epochs = {args.epochs}")
     logger.info(f"  Batch size per GPU = {args.batch_size}")
     logger.info(f"  Total train batch size = {args.batch_size*args.world_size}")
-    logger.info(f"  Total optimization steps = {args.total_steps}")
+    logger.info(f"  Total optimization steps = {args.total_steps}") 
 
     model.zero_grad()
     train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
-          model, optimizer, ema_model, scheduler)
+          model, optimizer, ema_model, scheduler, best_acc)
 
 if __name__ == '__main__':
     # $tensorboard --logdir=results

@@ -49,15 +49,10 @@ class Trainer(object):
         self.args = args
 
     def __call__(self):
-        import main as classification
-
         self._setup_gpu_args()
         classification.main(self.args)
 
     def checkpoint(self):
-        import os
-        import submitit
-
         self.args.dist_url = get_init_file().as_uri()
         checkpoint_file = os.path.join(self.args.output_dir, "checkpoint.pth")
         if os.path.exists(checkpoint_file):
@@ -67,9 +62,6 @@ class Trainer(object):
         return submitit.helpers.DelayedSubmission(empty_trainer)
 
     def _setup_gpu_args(self):
-        import submitit
-        from pathlib import Path
-
         job_env = submitit.JobEnvironment()
         self.args.output_dir = Path(str(self.args.output_dir).replace("%j", str(job_env.job_id)))
         self.args.gpu = job_env.local_rank
@@ -85,6 +77,7 @@ def main():
 
     # Note that the folder will depend on the job_id, to easily track experiments
     executor = submitit.AutoExecutor(folder=args.job_dir, slurm_max_num_timeout=30)
+    # executor = submitit.LocalExecutor(folder=args.job_dir)
 
     num_gpus_per_node = args.ngpus
     nodes = args.nodes
@@ -99,7 +92,7 @@ def main():
         kwargs['slurm_comment'] = args.comment
 
     executor.update_parameters(
-        mem_gb=60 * num_gpus_per_node, # 8 gpus
+        mem_gb=40 * num_gpus_per_node, # 8 gpus
         gpus_per_node=num_gpus_per_node, # 8 gpus
         tasks_per_node=num_gpus_per_node,  # one task per GPU
         cpus_per_task=4,
