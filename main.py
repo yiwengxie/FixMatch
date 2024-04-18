@@ -15,7 +15,7 @@ from utils.average_meter import AverageMeter
 from utils.checkpoint_utils import save_checkpoint
 from utils.lr_scheduler import get_cosine_schedule_with_warmup
 from utils.tensor_utils import interleave, de_interleave
-from utils.distributed_utils import init_distributed_mode
+from utils.distributed_utils import init_distributed_model
 from config.config import check_args, load_and_initialize_model
 import utils.distributed_utils
 
@@ -25,7 +25,8 @@ def initialize_logging(args):
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
+        # level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
+        level=logging.INFO)
     logger.warning(
         f"Process rank: {args.local_rank}, "
         f"device: {args.device}, "
@@ -140,7 +141,7 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
                     labeled_trainloader.sampler.set_epoch(labeled_epoch)
                 labeled_iter = iter(labeled_trainloader)
                 inputs_x, targets_x = next(iter(labeled_iter))
-            print('targets_x:', targets_x)
+            # print('targets_x:', targets_x)
             try:
                 # week and strong
                 (inputs_u_w, inputs_u_s), _ = next(iter(unlabeled_iter))
@@ -296,7 +297,7 @@ def test(args, test_loader, model, epoch):
     return losses.avg, top1.avg
 
 def main(args):
-    init_distributed_mode(args)
+    init_distributed_model(args)
     check_args(args)
     initialize_logging(args)
     model = create_model(args)
@@ -321,6 +322,3 @@ def main(args):
 if __name__ == '__main__':
     # $tensorboard --logdir=results
     main()
-
-
-

@@ -46,24 +46,24 @@ def save_on_master(*args, **kwargs):
         torch.save(*args, **kwargs)
 
 
-def init_distributed_mode(args):
+def init_distributed_model(args):
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        print(os.environ)
+        # print(os.environ)
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])
         args.gpu = int(os.environ['LOCAL_RANK'])
-    elif 'SUBMITIT_LOCAL_NTASKS' in os.environ: # !!!!!!!!!!!!!!!!!!!!!!!
-        print(os.environ)
-        args.rank = int(os.environ['SUBMITIT_LOCAL_LOCALID'])
-        args.world_size = int(os.environ['SUBMITIT_LOCAL_NTASKS'])
-        args.gpu = args.rank % torch.cuda.device_count()
+    # elif 'SUBMITIT_LOCAL_NTASKS' in os.environ: # for local debug
+    #     print(os.environ)
+    #     args.rank = int(os.environ['SUBMITIT_LOCAL_LOCALID'])
+    #     args.world_size = int(os.environ['SUBMITIT_LOCAL_NTASKS'])
+    #     args.gpu = args.rank % torch.cuda.device_count()
     elif 'SLURM_PROCID' in os.environ and int(os.environ['SLURM_NTASKS']) > 1:
-        print(os.environ)
+        # print(os.environ)
         args.rank = int(os.environ['SLURM_PROCID'])
         args.world_size = int(os.environ['SLURM_NTASKS'])
         args.gpu = args.rank % torch.cuda.device_count()
     else:
-        print(os.environ)
+        # print(os.environ)
         print('Not using distributed mode')
         args.distributed = False
         return

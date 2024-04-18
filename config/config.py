@@ -14,25 +14,27 @@ def get_config():
     parser.add_argument('--num-labeled', type=int, default=816, help='number of labeled data')
     parser.add_argument("--expand-labels", action="store_true", help="expand labels to fit eval steps")
     parser.add_argument('--arch', default='wideresnet', type=str, choices=['wideresnet', 'resnext'], help='dataset name')
-    parser.add_argument('--total-steps', default=60000, type=int, help='number of total steps to run')
-    parser.add_argument('--eval-step', default=1024, type=int, help='number of eval steps to run')
+    parser.add_argument('--total-steps', default=80000, type=int, help='number of total steps to run')
+    parser.add_argument('--eval-step', default=2048, type=int, help='number of eval steps to run')
     parser.add_argument('--start-epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
     parser.add_argument('--batch-size', default=32, type=int, help='train batchsize')
     parser.add_argument('--lr', '--learning-rate', default=0.03, type=float, help='initial learning rate')
     parser.add_argument('--warmup', default=0, type=float, help='warmup epochs (unlabeled data based)')
     parser.add_argument('--wdecay', default=5e-4, type=float, help='weight decay')
     parser.add_argument('--nesterov', action='store_true', default=True, help='use nesterov momentum')
-    parser.add_argument('--use-ema', action='store_true', default=True, help='use EMA model')
+    # something trouble 分布式模型load没有解决
+    parser.add_argument('--use-ema', action='store_true', default=False, help='use EMA model')
     parser.add_argument('--ema-decay', default=0.999, type=float, help='EMA decay rate')
     parser.add_argument('--mu', default=7, type=int, help='coefficient of unlabeled batch size')
     parser.add_argument('--lambda-u', default=1, type=float, help='coefficient of unlabeled loss')
     parser.add_argument('--T', default=1, type=float, help='pseudo label temperature')
     parser.add_argument('--threshold', default=0.95, type=float, help='pseudo label threshold')
-    parser.add_argument('--out', default='results', help='directory to output the result')
+    parser.add_argument('--out', default='newresults', help='directory to output the result')
     parser.add_argument('--resume', default='', type=str, help='path to latest checkpoint (default: none)')
     parser.add_argument('--seed', default=None, type=int, help="random seed")
     parser.add_argument("--amp", action="store_true", help="use 16-bit (mixed) precision through NVIDIA apex AMP")
     parser.add_argument("--opt_level", type=str, default="O1", help="apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']." "See details at https://nvidia.github.io/apex/amp.html")
+    # attention
     parser.add_argument('--dist-eval', action='store_true', default=False, help='Enabling distributed evaluation')
     parser.add_argument("--local_rank", type=int, default=os.getenv('LOCAL_RANK', -1), help="For distributed training: local_rank")
     parser.add_argument('--no-progress', action='store_true', help="don't use progress bar")
@@ -96,10 +98,9 @@ def load_and_initialize_model(args, model, optimizer, scheduler, best_acc):
     args.epochs = math.ceil(args.total_steps / args.eval_step)
     
     # Exponential Moving Average (EMA) model initialization
-    if args.use_ema:
-        from models.ema import ModelEMA
-        ema_model = ModelEMA(args, model, args.ema_decay)
-    
+    from models.ema import ModelEMA
+    ema_model = ModelEMA(args, model, args.ema_decay)
+
     # Initialize starting epoch
     args.start_epoch = 0
     
@@ -121,7 +122,7 @@ def load_and_initialize_model(args, model, optimizer, scheduler, best_acc):
     if args.amp:
         from apex import amp
         model, optimizer = amp.initialize(model, optimizer, opt_level=args.opt_level)
-
     
+
     return model, optimizer, scheduler, ema_model, best_acc
 

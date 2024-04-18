@@ -21,13 +21,10 @@ def create_model(args):
         sum(p.numel() for p in model.parameters())/1e6))
     
     device = torch.device(args.device, args.gpu)
-    print(device)
+    # print(device)
     model.to(device)
-    print(f"device:", device, "before:", model)
+    # print(f"device:", device, "before:", model)
     if args.distributed:
-        torch.distributed.barrier()
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], output_device=args.gpu, find_unused_parameters=True)
-
-    
 
     return model
