@@ -44,7 +44,9 @@ def get_cifar10(args, root):
     test_dataset = datasets.CIFAR10(
         root, train=False, transform=transform_val, download=False)
 
-    return train_labeled_dataset, train_unlabeled_dataset, test_dataset
+    valid_dataset = test_dataset
+
+    return train_labeled_dataset, train_unlabeled_dataset, test_dataset, valid_dataset
 
 
 def get_cifar100(args, root):
@@ -77,13 +79,15 @@ def get_cifar100(args, root):
 
     test_dataset = datasets.CIFAR100(
         root, train=False, transform=transform_val, download=False)
+    
+    valid_dataset = test_dataset
 
-    return train_labeled_dataset, train_unlabeled_dataset, test_dataset
+    return train_labeled_dataset, train_unlabeled_dataset, test_dataset, valid_dataset
 
 
 def get_flowers102(args, root):
-    # 128*4 
-    size = 256
+    # 128*4 256*1
+    size = 128
     transform_labeled = transforms.Compose([
         transforms.Resize((size, size)), 
         transforms.RandomHorizontalFlip(),
@@ -98,26 +102,34 @@ def get_flowers102(args, root):
         transforms.ToTensor(),
         transforms.Normalize(mean=normal_mean, std=normal_std)
     ])
-    base_dataset = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers", drop_labels=False )
+    base_dataset = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers-102-FixMatch", drop_labels=False )
     base_dataset_train = base_dataset['train']
-    base_dataset_test = base_dataset['train']
-    train_labeled_idxs, train_unlabeled_idxs = x_u_split(args, base_dataset_train['label'])
+    base_dataset_test = base_dataset['test']
+    base_dataset_valid = base_dataset['validation']
+    # train_labeled_idxs, train_unlabeled_idxs = x_u_split(args, base_dataset_train['label'])
     train_labeled_dataset = FLOWERS102(
-        root, train_labeled_idxs,
+        root, 
+        # train_labeled_idxs,
         transform=transform_labeled,
         dataset=base_dataset_train)
 
     train_unlabeled_dataset = FLOWERS102(
-        root, train_unlabeled_idxs,
+        root,
+        # train_unlabeled_idxs,
         transform=TransformFixMatch_flowers(mean=normal_mean, std=normal_std, size=size),
-        dataset=base_dataset_train)
+        dataset=base_dataset_valid)
 
     test_dataset = FLOWERS102(
         root, 
         transform=transform_val, 
         dataset=base_dataset_test)
+    
+    valid_dataset = FLOWERS102(
+        root, 
+        transform=transform_val, 
+        dataset=base_dataset_valid)
 
-    return train_labeled_dataset, train_unlabeled_dataset, test_dataset
+    return train_labeled_dataset, train_unlabeled_dataset, test_dataset, valid_dataset
 
 
 

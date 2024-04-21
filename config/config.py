@@ -11,14 +11,15 @@ def get_config():
     parser.add_argument('--device', default='cuda', help='device to use for training / testing')
     parser.add_argument('--num-workers', type=int, default=4, help='number of workers')
     parser.add_argument('--dataset', default='flowers102', type=str, choices=['cifar10', 'cifar100', 'flowers102'], help='dataset name')
-    parser.add_argument('--num-labeled', type=int, default=816, help='number of labeled data')
+    parser.add_argument('--num-labeled', type=int, default=612, help='number of labeled data')
     parser.add_argument("--expand-labels", action="store_true", help="expand labels to fit eval steps")
     parser.add_argument('--arch', default='wideresnet', type=str, choices=['wideresnet', 'resnext'], help='dataset name')
-    parser.add_argument('--total-steps', default=80000, type=int, help='number of total steps to run')
-    parser.add_argument('--eval-step', default=2048, type=int, help='number of eval steps to run')
+    # parser.add_argument('--total-steps', default=100000, type=int, help='number of total steps to run')
+    # parser.add_argument('--eval-step', default=1224, type=int, help='number of eval steps to run')
+    parser.add_argument('--epochs', default=1000, type=int, help='number of epochs to run')
     parser.add_argument('--start-epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
-    parser.add_argument('--batch-size', default=32, type=int, help='train batchsize')
-    parser.add_argument('--lr', '--learning-rate', default=0.03, type=float, help='initial learning rate')
+    parser.add_argument('--batch-size', default=4, type=int, help='train batchsize')
+    parser.add_argument('--lr', '--learning-rate', default=0.05, type=float, help='initial learning rate')
     parser.add_argument('--warmup', default=0, type=float, help='warmup epochs (unlabeled data based)')
     parser.add_argument('--wdecay', default=5e-4, type=float, help='weight decay')
     parser.add_argument('--nesterov', action='store_true', default=True, help='use nesterov momentum')
@@ -29,7 +30,7 @@ def get_config():
     parser.add_argument('--lambda-u', default=1, type=float, help='coefficient of unlabeled loss')
     parser.add_argument('--T', default=1, type=float, help='pseudo label temperature')
     parser.add_argument('--threshold', default=0.95, type=float, help='pseudo label threshold')
-    parser.add_argument('--out', default='newresults', help='directory to output the result')
+    parser.add_argument('--out', default='results', help='directory to output the result')
     parser.add_argument('--resume', default='', type=str, help='path to latest checkpoint (default: none)')
     parser.add_argument('--seed', default=None, type=int, help="random seed")
     parser.add_argument("--amp", action="store_true", help="use 16-bit (mixed) precision through NVIDIA apex AMP")
@@ -44,6 +45,9 @@ def get_config():
     # wwwwwwwwwc 这sb东西不能要
     # parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
+    parser.add_argument('--train', action='store_true', default=False, help='train the model')
+    parser.add_argument('--eval', action='store_true', default=False, help='evaluate the model')
+    parser.add_argument('--semi', action='store_true', default=False, help='train the model with unlabeled data')
 
     return parser
 
@@ -95,7 +99,7 @@ def check_args(args):
 
 def load_and_initialize_model(args, model, optimizer, scheduler, best_acc):
     # Calculate epochs based on total_steps and eval_step
-    args.epochs = math.ceil(args.total_steps / args.eval_step)
+    # args.epochs = math.ceil(args.total_steps / args.eval_step)
     
     # Exponential Moving Average (EMA) model initialization
     from models.ema import ModelEMA
@@ -122,7 +126,8 @@ def load_and_initialize_model(args, model, optimizer, scheduler, best_acc):
     if args.amp:
         from apex import amp
         model, optimizer = amp.initialize(model, optimizer, opt_level=args.opt_level)
-    
+
+    args.pretrained_model = args.out + '/model_best.pth.tar' 
 
     return model, optimizer, scheduler, ema_model, best_acc
 

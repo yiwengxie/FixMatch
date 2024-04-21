@@ -103,6 +103,10 @@ def main():
         slurm_signal_delay_s=120,
         **kwargs)
 
+    # 不用哪个节点
+    exclude_nodes = ["fvl09"]
+    executor.exclude_hostname = exclude_nodes
+
     executor.update_parameters(name="FixMatch")
 
     args.dist_url = get_init_file().as_uri()
