@@ -113,7 +113,79 @@ def create_optimizer(args, model):
                           momentum=0.9, nesterov=args.nesterov)
     return optimizer
 
-def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
+def train(args, train_loader, test_loader, model, optimizer, scheduler, best_acc):
+    test_accs = []
+    end = time.time()
+
+    for epoch in range(args.start_epoch, args.epochs):
+        model.train()
+        batch_time = AverageMeter()
+        data_time = AverageMeter()
+        losses = AverageMeter()
+
+        if not args.no_progress:
+            p_bar = tqdm(train_loader, disable=args.distributed and args.rank != 0)
+        
+        for batch_idx, (inputs, targets) in enumerate(train_loader):
+            data_time.update(time.time() - end)
+
+            inputs, targets = inputs.to(args.device), targets.to(args.device)
+            outputs = model(inputs)
+
+            loss = F.cross_entropy(outputs, targets)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+
+            losses.update(loss.item())
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            if not args.no_progress:
+                p_bar.set_description("Train Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.4f}. Data: {data:.3f}s. Batch: {bt:.3f}s. Loss: {loss:.4f}. ".format(
+                    epoch=epoch + 1,
+                    epochs=args.epochs,
+                    batch=batch_idx + 1,
+                    iter=len(train_loader),
+                    lr=scheduler.get_last_lr()[0],
+                    data=data_time.avg,
+                    bt=batch_time.avg,
+                    loss=losses.avg))
+                p_bar.update()
+            
+            if not args.no_progress:
+                p_bar.close()
+            
+            if (epoch+1) % 5 == 0:
+                if args.distributed == False or args.rank == 0:
+                    test_loss, test_acc = test(args, test_loader, model)
+
+                    args.writer.add_scalar('train/1.train_loss', losses.avg, epoch)
+                    args.writer.add_scalar('test/1.test_acc', test_acc, epoch)
+                    args.writer.add_scalar('test/2.test_loss', test_loss, epoch)
+
+                    is_best = test_acc > best_acc
+                    best_acc = max(test_acc, best_acc)
+
+                    model_to_save = model.module if hasattr(model, "module") else model
+                    save_checkpoint({
+                        'epoch': epoch + 1,
+                        'state_dict': model_to_save.state_dict(),
+                        'acc': test_acc,
+                        'best_acc': best_acc,
+                        'optimizer': optimizer.state_dict(),
+                        'scheduler': scheduler.state_dict(),
+                    }, is_best, args.out)
+
+                    test_accs.append(test_acc)
+                    logger.info('Best top-1 acc: {:.2f}'.format(best_acc))
+                    logger.info('Mean top-1 acc: {:.2f}\n'.format(
+                        np.mean(test_accs[-20:])))
+                    
+
+def train_semi(args, labeled_trainloader, unlabeled_trainloader, test_loader,
           model, optimizer, ema_model, scheduler, best_acc):
     if args.amp:
         from apex import amp
@@ -228,7 +300,7 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
         else:
             test_model = model
 
-        if (epoch+1) % 5 == 0:
+        if (epoch+1) % 10 == 0:
             if args.distributed == False or args.rank == 0:
                 test_loss, test_acc = test(args, test_loader, test_model)
 
@@ -354,6 +426,11 @@ def valid(args, valid_loader, model):
     logger.info("top-1 acc: {:.2f}".format(top1.avg))
     logger.info("top-5 acc: {:.2f}".format(top5.avg))
 
+def load_pretrained_model(args, model):
+    checkpoint = torch.load(args.pretrained_model, map_location=args.device)
+    model.load_state_dict(checkpoint['state_dict'])
+    logger.info(f"Pre-trained model loaded from {args.pretrained_model}")
+    return model
 
 def main(args):
     init_distributed_model(args)
@@ -375,11 +452,18 @@ def main(args):
         logger.info(f"  Num Epochs = {args.epochs}")
         logger.info(f"  Batch size per GPU = {args.batch_size}")
         logger.info(f"  Total train batch size = {args.batch_size*args.world_size}")
-        logger.info(f"  Total optimization steps = {args.total_steps}") 
-        train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
-          model, optimizer, ema_model, scheduler, best_acc)
+        logger.info(f"  Total optimization steps = {args.total_steps}")
+        if args.semi:
+            train_semi(args, labeled_trainloader, unlabeled_trainloader, test_loader, model, optimizer, ema_model, scheduler, best_acc)
+        else:
+            train(args, labeled_trainloader, test_loader, model, optimizer, scheduler, best_acc)
     if args.eval:
         logger.info("****************** Running validation ******************")
+        logger.info(f"  Task = {args.dataset}@{args.num_labeled}")
+        logger.info(f"  Num Epochs = {args.epochs}")
+        logger.info(f"  Batch size per GPU = {args.batch_size}")
+        logger.info(f"  Total train batch size = {args.batch_size*args.world_size}")
+        model = load_pretrained_model(args, model)
         valid(args, valid_loader, model)
 
 if __name__ == '__main__':

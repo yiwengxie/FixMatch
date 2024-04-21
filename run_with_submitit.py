@@ -101,11 +101,8 @@ def main():
         timeout_min=timeout_min,  # max is 60 * 48
         slurm_partition=partition, # fvl
         slurm_signal_delay_s=120,
+        slurm_exclude="fvl09", # 废物节点
         **kwargs)
-
-    # 不用哪个节点
-    exclude_nodes = ["fvl09"]
-    executor.exclude_hostname = exclude_nodes
 
     executor.update_parameters(name="FixMatch")
 

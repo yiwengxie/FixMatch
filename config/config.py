@@ -19,7 +19,7 @@ def get_config():
     parser.add_argument('--epochs', default=1000, type=int, help='number of epochs to run')
     parser.add_argument('--start-epoch', default=0, type=int, help='manual epoch number (useful on restarts)')
     parser.add_argument('--batch-size', default=4, type=int, help='train batchsize')
-    parser.add_argument('--lr', '--learning-rate', default=0.05, type=float, help='initial learning rate')
+    parser.add_argument('--lr', '--learning-rate', default=0.03, type=float, help='initial learning rate')
     parser.add_argument('--warmup', default=0, type=float, help='warmup epochs (unlabeled data based)')
     parser.add_argument('--wdecay', default=5e-4, type=float, help='weight decay')
     parser.add_argument('--nesterov', action='store_true', default=True, help='use nesterov momentum')
@@ -34,7 +34,7 @@ def get_config():
     parser.add_argument('--resume', default='', type=str, help='path to latest checkpoint (default: none)')
     parser.add_argument('--seed', default=None, type=int, help="random seed")
     parser.add_argument("--amp", action="store_true", help="use 16-bit (mixed) precision through NVIDIA apex AMP")
-    parser.add_argument("--opt_level", type=str, default="O1", help="apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']." "See details at https://nvidia.github.io/apex/amp.html")
+    parser.add_argument("--opt-level", type=str, default="O1", help="apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']." "See details at https://nvidia.github.io/apex/amp.html")
     # attention
     parser.add_argument('--dist-eval', action='store_true', default=False, help='Enabling distributed evaluation')
     parser.add_argument("--local_rank", type=int, default=os.getenv('LOCAL_RANK', -1), help="For distributed training: local_rank")
@@ -48,6 +48,7 @@ def get_config():
     parser.add_argument('--train', action='store_true', default=False, help='train the model')
     parser.add_argument('--eval', action='store_true', default=False, help='evaluate the model')
     parser.add_argument('--semi', action='store_true', default=False, help='train the model with unlabeled data')
+    parser.add_argument('--pretrained-model', default='results_test/model_best.pth.tar', type=str, help='path to pretrained model')
 
     return parser
 
@@ -126,8 +127,6 @@ def load_and_initialize_model(args, model, optimizer, scheduler, best_acc):
     if args.amp:
         from apex import amp
         model, optimizer = amp.initialize(model, optimizer, opt_level=args.opt_level)
-
-    args.pretrained_model = args.out + '/model_best.pth.tar' 
 
     return model, optimizer, scheduler, ema_model, best_acc
 
