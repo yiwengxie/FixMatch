@@ -102,22 +102,24 @@ def get_flowers102(args, root):
         transforms.ToTensor(),
         transforms.Normalize(mean=normal_mean, std=normal_std)
     ])
-    base_dataset = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers-102-FixMatch", drop_labels=False )
-    base_dataset_train = base_dataset['train']
-    base_dataset_test = base_dataset['test']
-    base_dataset_valid = base_dataset['validation']
+    base_dataset_labeled = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers-102-FixMatch-labeled", drop_labels=False)
+    base_dataset_unlabeled = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers-102-FixMatch-unlabeled", drop_labels=False)
+    base_dataset_train_labeled = base_dataset_labeled['train']
+    base_dataset_train_unlabeled = base_dataset_unlabeled['train']
+    base_dataset_valid = base_dataset_labeled['validation']
+    base_dataset_test = base_dataset_labeled['test']
     # train_labeled_idxs, train_unlabeled_idxs = x_u_split(args, base_dataset_train['label'])
     train_labeled_dataset = FLOWERS102(
         root, 
         # train_labeled_idxs,
         transform=transform_labeled,
-        dataset=base_dataset_train)
+        dataset=base_dataset_train_labeled)
 
     train_unlabeled_dataset = FLOWERS102(
         root,
         # train_unlabeled_idxs,
         transform=TransformFixMatch_flowers(mean=normal_mean, std=normal_std, size=size),
-        dataset=base_dataset_valid)
+        dataset=base_dataset_train_unlabeled)
 
     test_dataset = FLOWERS102(
         root, 

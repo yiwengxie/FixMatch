@@ -36,10 +36,10 @@ def initialize_logging(args):
     logger.info(dict(args._get_kwargs()))
 
 def load_datasets(args):
-    labeled_dataset, unlabeled_dataset, test_dataset, valid_dataset = DATASET_GETTERS[args.dataset](args, './data')
-    return labeled_dataset, unlabeled_dataset, test_dataset, valid_dataset
+    labeled_dataset, unlabeled_dataset, valid_dataset, test_dataset = DATASET_GETTERS[args.dataset](args, './data')
+    return labeled_dataset, unlabeled_dataset, valid_dataset, test_dataset
 
-def create_data_loaders(args, labeled_dataset, unlabeled_dataset, test_dataset, valid_dataset):
+def create_data_loaders(args, labeled_dataset, unlabeled_dataset, valid_dataset, test_dataset):
     if args.distributed:
         num_tasks = utils.distributed_utils.get_world_size()
         global_rank = utils.distributed_utils.get_rank()
@@ -58,20 +58,20 @@ def create_data_loaders(args, labeled_dataset, unlabeled_dataset, test_dataset, 
                 unlabeled_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
             )
         if args.dist_eval:
-            if len(test_dataset) % num_tasks != 0:
+            if len(valid_dataset) % num_tasks != 0:
                 print('Warning: Enabling distributed evaluation with an eval dataset not divisible by process number. '
-                      'This will slightly alter validation results as extra duplicate entries are added to achieve '
+                      'This will slightly alter testation results as extra duplicate entries are added to achieve '
                       'equal num of samples per-process.')
-            sampler_test = torch.utils.data.DistributedSampler(
-                test_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=False)
+            sampler_valid = torch.utils.data.DistributedSampler(
+                valid_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=False)
         else:
-            sampler_test = torch.utils.data.SequentialSampler(test_dataset)
+            sampler_valid = torch.utils.data.SequentialSampler(valid_dataset)
     else:
         sampler_train_labeled = torch.utils.data.RandomSampler(labeled_dataset)
         sampler_train_unlabeled = torch.utils.data.RandomSampler(unlabeled_dataset)
-        sampler_test = torch.utils.data.SequentialSampler(test_dataset)
+        sampler_valid = torch.utils.data.SequentialSampler(valid_dataset)
     
-    sampler_valid = torch.utils.data.SequentialSampler(valid_dataset)
+    sampler_test = torch.utils.data.SequentialSampler(test_dataset)
     
     labeled_trainloader = DataLoader(
         labeled_dataset,
@@ -87,19 +87,19 @@ def create_data_loaders(args, labeled_dataset, unlabeled_dataset, test_dataset, 
         num_workers=args.num_workers,
         drop_last=True)
 
-    test_loader = DataLoader(
-        test_dataset,
-        sampler=sampler_test,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers)
-    
     valid_loader = DataLoader(
         valid_dataset,
         sampler=sampler_valid,
         batch_size=args.batch_size,
         num_workers=args.num_workers)
+    
+    test_loader = DataLoader(
+        test_dataset,
+        sampler=sampler_test,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers)
 
-    return labeled_trainloader, unlabeled_trainloader, test_loader, valid_loader
+    return labeled_trainloader, unlabeled_trainloader, valid_loader, test_loader
 
 def create_optimizer(args, model):
     no_decay = ['bias', 'bn']
@@ -113,8 +113,8 @@ def create_optimizer(args, model):
                           momentum=0.9, nesterov=args.nesterov)
     return optimizer
 
-def train(args, train_loader, test_loader, model, optimizer, scheduler, best_acc):
-    test_accs = []
+def train(args, train_loader, valid_loader, model, optimizer, scheduler, best_acc):
+    valid_accs = []
     end = time.time()
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -124,7 +124,7 @@ def train(args, train_loader, test_loader, model, optimizer, scheduler, best_acc
         losses = AverageMeter()
 
         if not args.no_progress:
-            p_bar = tqdm(train_loader, disable=args.distributed and args.rank != 0)
+            p_bar = tqdm(range(args.eval_step))
         
         for batch_idx, (inputs, targets) in enumerate(train_loader):
             data_time.update(time.time() - end)
@@ -155,41 +155,41 @@ def train(args, train_loader, test_loader, model, optimizer, scheduler, best_acc
                     loss=losses.avg))
                 p_bar.update()
             
-            if not args.no_progress:
+        if not args.no_progress:
                 p_bar.close()
             
-            if (epoch+1) % 5 == 0:
-                if args.distributed == False or args.rank == 0:
-                    test_loss, test_acc = test(args, test_loader, model)
+        if (epoch+1) % 5 == 0:
+            if args.distributed == False or args.rank == 0:
+                valid_loss, valid_acc = valid(args, valid_loader, model)
 
-                    args.writer.add_scalar('train/1.train_loss', losses.avg, epoch)
-                    args.writer.add_scalar('test/1.test_acc', test_acc, epoch)
-                    args.writer.add_scalar('test/2.test_loss', test_loss, epoch)
+                args.writer.add_scalar('train/1.train_loss', losses.avg, epoch)
+                args.writer.add_scalar('valid/1.valid_acc', valid_acc, epoch)
+                args.writer.add_scalar('valid/2.valid_loss', valid_loss, epoch)
 
-                    is_best = test_acc > best_acc
-                    best_acc = max(test_acc, best_acc)
+                is_best = valid_acc > best_acc
+                best_acc = max(valid_acc, best_acc)
 
-                    model_to_save = model.module if hasattr(model, "module") else model
-                    save_checkpoint({
-                        'epoch': epoch + 1,
-                        'state_dict': model_to_save.state_dict(),
-                        'acc': test_acc,
-                        'best_acc': best_acc,
-                        'optimizer': optimizer.state_dict(),
-                        'scheduler': scheduler.state_dict(),
-                    }, is_best, args.out)
+                model_to_save = model.module if hasattr(model, "module") else model
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'state_dict': model_to_save.state_dict(),
+                    'acc': valid_acc,
+                    'best_acc': best_acc,
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                }, is_best, args.out)
 
-                    test_accs.append(test_acc)
-                    logger.info('Best top-1 acc: {:.2f}'.format(best_acc))
-                    logger.info('Mean top-1 acc: {:.2f}\n'.format(
-                        np.mean(test_accs[-20:])))
+                valid_accs.append(valid_acc)
+                logger.info('Best top-1 acc: {:.2f}'.format(best_acc))
+                logger.info('Mean top-1 acc: {:.2f}\n'.format(
+                    np.mean(valid_accs[-20:])))
                     
 
-def train_semi(args, labeled_trainloader, unlabeled_trainloader, test_loader,
+def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
           model, optimizer, ema_model, scheduler, best_acc):
     if args.amp:
         from apex import amp
-    test_accs = []
+    valid_accs = []
     end = time.time()
 
     if args.distributed:
@@ -212,8 +212,7 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, test_loader,
         losses_u = AverageMeter()
         mask_probs = AverageMeter()
         if not args.no_progress:
-            p_bar = tqdm(range(args.eval_step),
-                         disable=args.distributed and args.rank != 0)
+            p_bar = tqdm(range(args.eval_step))
         for batch_idx in range(args.eval_step):
             
             try:
@@ -296,23 +295,23 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, test_loader,
             p_bar.close()
 
         if args.use_ema:
-            test_model = ema_model.ema
+            valid_model = ema_model.ema
         else:
-            test_model = model
+            valid_model = model
 
         if (epoch+1) % 10 == 0:
             if args.distributed == False or args.rank == 0:
-                test_loss, test_acc = test(args, test_loader, test_model)
+                valid_loss, valid_acc = valid(args, valid_loader, valid_model)
 
                 args.writer.add_scalar('train/1.train_loss', losses.avg, epoch)
                 args.writer.add_scalar('train/2.train_loss_x', losses_x.avg, epoch)
                 args.writer.add_scalar('train/3.train_loss_u', losses_u.avg, epoch)
                 args.writer.add_scalar('train/4.mask', mask_probs.avg, epoch)
-                args.writer.add_scalar('test/1.test_acc', test_acc, epoch)
-                args.writer.add_scalar('test/2.test_loss', test_loss, epoch)
+                args.writer.add_scalar('valid/1.valid_acc', valid_acc, epoch)
+                args.writer.add_scalar('valid/2.valid_loss', valid_loss, epoch)
 
-                is_best = test_acc > best_acc
-                best_acc = max(test_acc, best_acc)
+                is_best = valid_acc > best_acc
+                best_acc = max(valid_acc, best_acc)
 
                 model_to_save = model.module if hasattr(model, "module") else model
                 if args.use_ema:
@@ -322,65 +321,20 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, test_loader,
                     'epoch': epoch + 1,
                     'state_dict': model_to_save.state_dict(),
                     'ema_state_dict': ema_to_save.state_dict() if args.use_ema else None,
-                    'acc': test_acc,
+                    'acc': valid_acc,
                     'best_acc': best_acc,
                     'optimizer': optimizer.state_dict(),
                     'scheduler': scheduler.state_dict(),
                 }, is_best, args.out)
 
-                test_accs.append(test_acc)
+                valid_accs.append(valid_acc)
                 logger.info('Best top-1 acc: {:.2f}'.format(best_acc))
                 logger.info('Mean top-1 acc: {:.2f}\n'.format(
-                    np.mean(test_accs[-20:])))
+                    np.mean(valid_accs[-20:])))
 
     if args.distributed == False or args.rank == 0:
         args.writer.close()
 
-
-def test(args, test_loader, model):
-    batch_time = AverageMeter()
-    data_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
-    end = time.time()
-
-    if not args.no_progress:
-        test_loader = tqdm(test_loader, disable=args.distributed == True and args.rank != 0)
-
-    with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(test_loader):
-            model.eval()
-
-            data_time.update(time.time() - end)
-
-            inputs = inputs.to(args.device)
-            targets = targets.to(args.device)
-            outputs = model(inputs)
-            loss = F.cross_entropy(outputs, targets)
-
-            prec1, prec5 = accuracy(outputs, targets, topk=(1, 5))
-            losses.update(loss.item(), inputs.shape[0])
-            top1.update(prec1.item(), inputs.shape[0])
-            top5.update(prec5.item(), inputs.shape[0])
-            batch_time.update(time.time() - end)
-            end = time.time()
-            if not args.no_progress:
-                test_loader.set_description("Test Iter: {batch:4}/{iter:4}. Data: {data:.3f}s. Batch: {bt:.3f}s. Loss: {loss:.4f}. top1: {top1:.2f}. top5: {top5:.2f}. ".format(
-                    batch=batch_idx + 1,
-                    iter=len(test_loader),
-                    data=data_time.avg,
-                    bt=batch_time.avg,
-                    loss=losses.avg,
-                    top1=top1.avg,
-                    top5=top5.avg,
-                ))
-        if not args.no_progress:
-            test_loader.close()
-
-    logger.info("top-1 acc: {:.2f}".format(top1.avg))
-    logger.info("top-5 acc: {:.2f}".format(top5.avg))
-    return losses.avg, top1.avg
 
 def valid(args, valid_loader, model):
     batch_time = AverageMeter()
@@ -391,7 +345,7 @@ def valid(args, valid_loader, model):
     end = time.time()
 
     if not args.no_progress:
-        valid_loader = tqdm(valid_loader, disable=args.distributed == True and args.rank != 0)
+        valid_loader = tqdm(valid_loader)
 
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(valid_loader):
@@ -411,7 +365,7 @@ def valid(args, valid_loader, model):
             batch_time.update(time.time() - end)
             end = time.time()
             if not args.no_progress:
-                valid_loader.set_description("Valid Iter: {batch:4}/{iter:4}. Data: {data:.3f}s. Batch: {bt:.3f}s. Loss: {loss:.4f}. top1: {top1:.2f}. top5: {top5:.2f}. ".format(
+                valid_loader.set_description("valid Iter: {batch:4}/{iter:4}. Data: {data:.3f}s. Batch: {bt:.3f}s. Loss: {loss:.4f}. top1: {top1:.2f}. top5: {top5:.2f}. ".format(
                     batch=batch_idx + 1,
                     iter=len(valid_loader),
                     data=data_time.avg,
@@ -422,6 +376,51 @@ def valid(args, valid_loader, model):
                 ))
         if not args.no_progress:
             valid_loader.close()
+
+    logger.info("top-1 acc: {:.2f}".format(top1.avg))
+    logger.info("top-5 acc: {:.2f}".format(top5.avg))
+    return losses.avg, top1.avg
+
+def test(args, test_loader, model):
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    losses = AverageMeter()
+    top1 = AverageMeter()
+    top5 = AverageMeter()
+    end = time.time()
+
+    if not args.no_progress:
+        test_loader = tqdm(test_loader)
+
+    with torch.no_grad():
+        for batch_idx, (inputs, targets) in enumerate(test_loader):
+            model.eval()
+
+            data_time.update(time.time() - end)
+
+            inputs = inputs.to(args.device)
+            targets = targets.to(args.device)
+            outputs = model(inputs)
+            loss = F.cross_entropy(outputs, targets)
+
+            prec1, prec5 = accuracy(outputs, targets, topk=(1, 5))
+            losses.update(loss.item(), inputs.shape[0])
+            top1.update(prec1.item(), inputs.shape[0])
+            top5.update(prec5.item(), inputs.shape[0])
+            batch_time.update(time.time() - end)
+            end = time.time()
+            if not args.no_progress:
+                test_loader.set_description("test Iter: {batch:4}/{iter:4}. Data: {data:.3f}s. Batch: {bt:.3f}s. Loss: {loss:.4f}. top1: {top1:.2f}. top5: {top5:.2f}. ".format(
+                    batch=batch_idx + 1,
+                    iter=len(test_loader),
+                    data=data_time.avg,
+                    bt=batch_time.avg,
+                    loss=losses.avg,
+                    top1=top1.avg,
+                    top5=top5.avg,
+                ))
+        if not args.no_progress:
+            test_loader.close()
 
     logger.info("top-1 acc: {:.2f}".format(top1.avg))
     logger.info("top-5 acc: {:.2f}".format(top5.avg))
@@ -437,8 +436,8 @@ def main(args):
     check_args(args)
     initialize_logging(args)
     model = create_model(args)
-    labeled_dataset, unlabeled_dataset, test_dataset, valid_dataset = load_datasets(args)
-    labeled_trainloader, unlabeled_trainloader, test_loader, valid_loader = create_data_loaders(args, labeled_dataset, unlabeled_dataset, test_dataset, valid_dataset)
+    labeled_dataset, unlabeled_dataset, valid_dataset, test_dataset = load_datasets(args)
+    labeled_trainloader, unlabeled_trainloader, valid_loader, test_loader = create_data_loaders(args, labeled_dataset, unlabeled_dataset, valid_dataset, test_dataset)
     optimizer = create_optimizer(args, model)
     args.total_steps = args.epochs * len(labeled_dataset)
     args.eval_step = len(labeled_dataset) // (args.batch_size*args.world_size)
@@ -454,17 +453,17 @@ def main(args):
         logger.info(f"  Total train batch size = {args.batch_size*args.world_size}")
         logger.info(f"  Total optimization steps = {args.total_steps}")
         if args.semi:
-            train_semi(args, labeled_trainloader, unlabeled_trainloader, test_loader, model, optimizer, ema_model, scheduler, best_acc)
+            train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader, model, optimizer, ema_model, scheduler, best_acc)
         else:
-            train(args, labeled_trainloader, test_loader, model, optimizer, scheduler, best_acc)
-    if args.eval:
-        logger.info("****************** Running validation ******************")
+            train(args, labeled_trainloader, valid_loader, model, optimizer, scheduler, best_acc)
+    if args.test:
+        logger.info("****************** Running testation ******************")
         logger.info(f"  Task = {args.dataset}@{args.num_labeled}")
         logger.info(f"  Num Epochs = {args.epochs}")
         logger.info(f"  Batch size per GPU = {args.batch_size}")
         logger.info(f"  Total train batch size = {args.batch_size*args.world_size}")
         model = load_pretrained_model(args, model)
-        valid(args, valid_loader, model)
+        test(args, test_loader, model)
 
 if __name__ == '__main__':
     # $tensorboard --logdir=results
