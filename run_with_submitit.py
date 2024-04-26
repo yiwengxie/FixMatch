@@ -102,6 +102,7 @@ def main():
         slurm_partition=partition, # fvl
         slurm_signal_delay_s=120,
         slurm_exclude="fvl09", # 废物节点
+        # slurm_nodelist="fvl15", # 老子就要用这个
         **kwargs)
 
     executor.update_parameters(name="FixMatch")

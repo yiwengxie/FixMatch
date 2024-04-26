@@ -201,7 +201,7 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
     labeled_iter = iter(labeled_trainloader)
     unlabeled_iter = iter(unlabeled_trainloader)
 
-    # 坑死爹啦！！！！！！！！！！！！
+    # 坑死爹啦！！！！！！！！！！！！ Lead to loss = nan !!!!!!!!!!
     # model.train()
     for epoch in range(args.start_epoch, args.epochs):
         model.train()
@@ -211,14 +211,15 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
         losses_x = AverageMeter()
         losses_u = AverageMeter()
         mask_probs = AverageMeter()
+
         if not args.no_progress:
             p_bar = tqdm(range(args.eval_step))
+        
         for batch_idx in range(args.eval_step):
-            
             try:
                 inputs_x, targets_x = next(iter(labeled_iter))
             except:
-                if args.world_size > 1:
+                if args.distributed:
                     labeled_epoch += 1
                     labeled_trainloader.sampler.set_epoch(labeled_epoch)
                 labeled_iter = iter(labeled_trainloader)
@@ -227,17 +228,15 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
                 # week and strong
                 (inputs_u_w, inputs_u_s), _ = next(iter(unlabeled_iter))
             except:
-                if args.world_size > 1:
+                if args.distributed:
                     unlabeled_epoch += 1
                     unlabeled_trainloader.sampler.set_epoch(unlabeled_epoch)
                 unlabeled_iter = iter(unlabeled_trainloader)
                 (inputs_u_w, inputs_u_s), _ = next(iter(unlabeled_iter))
-
             data_time.update(time.time() - end)
+
             batch_size = inputs_x.shape[0]
-            # ？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？？
-            inputs = interleave(
-                torch.cat((inputs_x, inputs_u_w, inputs_u_s)), 2*args.mu+1).to(args.device)
+            inputs = interleave(torch.cat((inputs_x, inputs_u_w, inputs_u_s)), 2*args.mu+1).to(args.device)
             targets_x = targets_x.to(args.device)
             logits = model(inputs)
             logits = de_interleave(logits, 2*args.mu+1)
@@ -251,10 +250,10 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
             max_probs, targets_u = torch.max(pseudo_label, dim=-1)
             mask = max_probs.ge(args.threshold).float()
 
-            Lu = (F.cross_entropy(logits_u_s, targets_u,
-                                  reduction='none') * mask).mean()
+            Lu = (F.cross_entropy(logits_u_s, targets_u, reduction='none') * mask).mean()
 
-            loss = Lx + args.lambda_u * Lu
+            # loss = Lx + args.lambda_u * Lu
+            loss = Lx
 
             optimizer.zero_grad()
 
@@ -299,7 +298,7 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
         else:
             valid_model = model
 
-        if (epoch+1) % 10 == 0:
+        if (epoch+1) % 5 == 0:
             if args.distributed == False or args.rank == 0:
                 valid_loss, valid_acc = valid(args, valid_loader, valid_model)
 

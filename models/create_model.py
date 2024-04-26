@@ -2,6 +2,7 @@ import torch.nn as nn
 import logging
 import torch
 import torchvision.models as models
+import torchvision
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +12,7 @@ def create_model(args):
         num_ftrs = model.fc.in_features
         model.fc = nn.Linear(num_ftrs, args.num_classes)
     elif args.arch == 'resnet50':
-        model = models.resnet50(pretrained=True)
+        model = models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V1)
         num_ftrs = model.fc.in_features
         model.fc = nn.Linear(num_ftrs, args.num_classes)
     elif args.arch == 'wideresnet':
@@ -31,6 +32,6 @@ def create_model(args):
     model.to(device)
     # print(f"device:", device, "before:", model)
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], output_device=args.gpu, find_unused_parameters=True)
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], output_device=args.gpu, find_unused_parameters=False)
 
     return model

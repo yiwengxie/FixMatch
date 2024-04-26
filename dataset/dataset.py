@@ -87,7 +87,7 @@ def get_cifar100(args, root):
 
 def get_flowers102(args, root):
     # 128*4 256*1
-    size = 128
+    size = 256
     transform_labeled = transforms.Compose([
         transforms.Resize((size, size)), 
         transforms.RandomHorizontalFlip(),
@@ -102,8 +102,8 @@ def get_flowers102(args, root):
         transforms.ToTensor(),
         transforms.Normalize(mean=normal_mean, std=normal_std)
     ])
-    base_dataset_labeled = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers-102-FixMatch-labeled", drop_labels=False)
-    base_dataset_unlabeled = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers-102-FixMatch-unlabeled", drop_labels=False)
+    base_dataset_labeled = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers-102-FixMatch-labeled-one", drop_labels=False)
+    base_dataset_unlabeled = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers-102-FixMatch-unlabeled-one", drop_labels=False)
     base_dataset_train_labeled = base_dataset_labeled['train']
     base_dataset_train_unlabeled = base_dataset_unlabeled['train']
     base_dataset_valid = base_dataset_labeled['validation']
