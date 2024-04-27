@@ -102,10 +102,22 @@ def get_flowers102(args, root):
         transforms.ToTensor(),
         transforms.Normalize(mean=normal_mean, std=normal_std)
     ])
-    base_dataset_labeled = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers-102-FixMatch-labeled-one", drop_labels=False)
-    base_dataset_unlabeled = load_dataset("imagefolder", data_dir="/vhome/xieyiweng/flowers-102-FixMatch-unlabeled-one", drop_labels=False)
+    if args.one:
+        folder = "/vhome/xieyiweng/flowers-102-FixMatch-one"
+    else:
+        folder = "/vhome/xieyiweng/flowers-102-FixMatch"
+    base_dataset_labeled = load_dataset("imagefolder", 
+                                        data_dir=f"{folder}/flowers-102-FixMatch-labeled",
+                                        drop_labels=False)
+    base_dataset_unlabeled = load_dataset("imagefolder",
+                                        data_dir=f"{folder}/flowers-102-FixMatch-unlabeled",
+                                        drop_labels=False)
+    base_dataset_generated = load_dataset("imagefolder",
+                                        data_dir=f"{folder}/flowers-102-FixMatch-generated",
+                                        drop_labels=False)
     base_dataset_train_labeled = base_dataset_labeled['train']
     base_dataset_train_unlabeled = base_dataset_unlabeled['train']
+    base_dataset_train_generated = base_dataset_generated['train']
     base_dataset_valid = base_dataset_labeled['validation']
     base_dataset_test = base_dataset_labeled['test']
     # train_labeled_idxs, train_unlabeled_idxs = x_u_split(args, base_dataset_train['label'])
@@ -120,6 +132,12 @@ def get_flowers102(args, root):
         # train_unlabeled_idxs,
         transform=TransformFixMatch_flowers(mean=normal_mean, std=normal_std, size=size),
         dataset=base_dataset_train_unlabeled)
+    
+    train_generated_dataset = FLOWERS102(
+        root, 
+        # train_labeled_idxs,
+        transform=transform_labeled,
+        dataset=base_dataset_train_generated)
 
     test_dataset = FLOWERS102(
         root, 
@@ -131,7 +149,7 @@ def get_flowers102(args, root):
         transform=transform_val, 
         dataset=base_dataset_valid)
 
-    return train_labeled_dataset, train_unlabeled_dataset, test_dataset, valid_dataset
+    return train_labeled_dataset, train_unlabeled_dataset, train_generated_dataset, test_dataset, valid_dataset
 
 
 

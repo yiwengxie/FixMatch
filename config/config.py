@@ -50,6 +50,7 @@ def get_config():
     parser.add_argument('--test', action='store_true', default=False, help='test the model')
     parser.add_argument('--semi', action='store_true', default=False, help='train the model with unlabeled data')
     parser.add_argument('--pretrained-model', default='results_test/model_best.pth.tar', type=str, help='path to pretrained model')
+    parser.add_argument('--one', action='store_true', default=False, help='train the model with one data')
 
     return parser
 

@@ -36,16 +36,19 @@ def initialize_logging(args):
     logger.info(dict(args._get_kwargs()))
 
 def load_datasets(args):
-    labeled_dataset, unlabeled_dataset, valid_dataset, test_dataset = DATASET_GETTERS[args.dataset](args, './data')
-    return labeled_dataset, unlabeled_dataset, valid_dataset, test_dataset
+    labeled_dataset, unlabeled_dataset, generated_dataset, valid_dataset, test_dataset = DATASET_GETTERS[args.dataset](args, './data')
+    return labeled_dataset, unlabeled_dataset, generated_dataset, valid_dataset, test_dataset
 
-def create_data_loaders(args, labeled_dataset, unlabeled_dataset, valid_dataset, test_dataset):
+def create_data_loaders(args, labeled_dataset, unlabeled_dataset, generated_dataset, valid_dataset, test_dataset):
     if args.distributed:
         num_tasks = utils.distributed_utils.get_world_size()
         global_rank = utils.distributed_utils.get_rank()
         if args.repeated_aug:
             sampler_train_labeled = RASampler(
                 labeled_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
+            )
+            sampler_train_generated = RASampler(
+                generated_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
             )
             sampler_train_unlabeled = RASampler(
                 unlabeled_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
@@ -56,6 +59,9 @@ def create_data_loaders(args, labeled_dataset, unlabeled_dataset, valid_dataset,
             )
             sampler_train_unlabeled = torch.utils.data.DistributedSampler(
                 unlabeled_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
+            )
+            sampler_train_generated = torch.utils.data.DistributedSampler(
+                generated_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True
             )
         if args.dist_eval:
             if len(valid_dataset) % num_tasks != 0:
@@ -69,6 +75,7 @@ def create_data_loaders(args, labeled_dataset, unlabeled_dataset, valid_dataset,
     else:
         sampler_train_labeled = torch.utils.data.RandomSampler(labeled_dataset)
         sampler_train_unlabeled = torch.utils.data.RandomSampler(unlabeled_dataset)
+        sampler_train_generated = torch.utils.data.RandomSampler(generated_dataset)
         sampler_valid = torch.utils.data.SequentialSampler(valid_dataset)
     
     sampler_test = torch.utils.data.SequentialSampler(test_dataset)
@@ -87,6 +94,13 @@ def create_data_loaders(args, labeled_dataset, unlabeled_dataset, valid_dataset,
         num_workers=args.num_workers,
         drop_last=True)
 
+    generated_trainloader = DataLoader(
+        generated_dataset,
+        sampler=sampler_train_generated,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        drop_last=True)
+
     valid_loader = DataLoader(
         valid_dataset,
         sampler=sampler_valid,
@@ -99,7 +113,7 @@ def create_data_loaders(args, labeled_dataset, unlabeled_dataset, valid_dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers)
 
-    return labeled_trainloader, unlabeled_trainloader, valid_loader, test_loader
+    return labeled_trainloader, unlabeled_trainloader, generated_trainloader, valid_loader, test_loader
 
 def create_optimizer(args, model):
     no_decay = ['bias', 'bn']
@@ -113,79 +127,79 @@ def create_optimizer(args, model):
                           momentum=0.9, nesterov=args.nesterov)
     return optimizer
 
-def train(args, train_loader, valid_loader, model, optimizer, scheduler, best_acc):
-    valid_accs = []
-    end = time.time()
+# def train(args, train_loader, valid_loader, model, optimizer, scheduler, best_acc):
+#     valid_accs = []
+#     end = time.time()
 
-    for epoch in range(args.start_epoch, args.epochs):
-        model.train()
-        batch_time = AverageMeter()
-        data_time = AverageMeter()
-        losses = AverageMeter()
+#     for epoch in range(args.start_epoch, args.epochs):
+#         model.train()
+#         batch_time = AverageMeter()
+#         data_time = AverageMeter()
+#         losses = AverageMeter()
 
-        if not args.no_progress:
-            p_bar = tqdm(range(args.eval_step))
+#         if not args.no_progress:
+#             p_bar = tqdm(range(args.eval_step))
         
-        for batch_idx, (inputs, targets) in enumerate(train_loader):
-            data_time.update(time.time() - end)
+#         for batch_idx, (inputs, targets) in enumerate(train_loader):
+#             data_time.update(time.time() - end)
 
-            inputs, targets = inputs.to(args.device), targets.to(args.device)
-            outputs = model(inputs)
+#             inputs, targets = inputs.to(args.device), targets.to(args.device)
+#             outputs = model(inputs)
 
-            loss = F.cross_entropy(outputs, targets)
+#             loss = F.cross_entropy(outputs, targets)
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            scheduler.step()
+#             optimizer.zero_grad()
+#             loss.backward()
+#             optimizer.step()
+#             scheduler.step()
 
-            losses.update(loss.item())
-            batch_time.update(time.time() - end)
-            end = time.time()
+#             losses.update(loss.item())
+#             batch_time.update(time.time() - end)
+#             end = time.time()
 
-            if not args.no_progress:
-                p_bar.set_description("Train Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.4f}. Data: {data:.3f}s. Batch: {bt:.3f}s. Loss: {loss:.4f}. ".format(
-                    epoch=epoch + 1,
-                    epochs=args.epochs,
-                    batch=batch_idx + 1,
-                    iter=len(train_loader),
-                    lr=scheduler.get_last_lr()[0],
-                    data=data_time.avg,
-                    bt=batch_time.avg,
-                    loss=losses.avg))
-                p_bar.update()
+#             if not args.no_progress:
+#                 p_bar.set_description("Train Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.4f}. Data: {data:.3f}s. Batch: {bt:.3f}s. Loss: {loss:.4f}. ".format(
+#                     epoch=epoch + 1,
+#                     epochs=args.epochs,
+#                     batch=batch_idx + 1,
+#                     iter=len(train_loader),
+#                     lr=scheduler.get_last_lr()[0],
+#                     data=data_time.avg,
+#                     bt=batch_time.avg,
+#                     loss=losses.avg))
+#                 p_bar.update()
             
-        if not args.no_progress:
-                p_bar.close()
+#         if not args.no_progress:
+#                 p_bar.close()
             
-        if (epoch+1) % 5 == 0:
-            if args.distributed == False or args.rank == 0:
-                valid_loss, valid_acc = valid(args, valid_loader, model)
+#         if (epoch+1) % 5 == 0:
+#             if args.distributed == False or args.rank == 0:
+#                 valid_loss, valid_acc = valid(args, valid_loader, model)
 
-                args.writer.add_scalar('train/1.train_loss', losses.avg, epoch)
-                args.writer.add_scalar('valid/1.valid_acc', valid_acc, epoch)
-                args.writer.add_scalar('valid/2.valid_loss', valid_loss, epoch)
+#                 args.writer.add_scalar('train/1.train_loss', losses.avg, epoch)
+#                 args.writer.add_scalar('valid/1.valid_acc', valid_acc, epoch)
+#                 args.writer.add_scalar('valid/2.valid_loss', valid_loss, epoch)
 
-                is_best = valid_acc > best_acc
-                best_acc = max(valid_acc, best_acc)
+#                 is_best = valid_acc > best_acc
+#                 best_acc = max(valid_acc, best_acc)
 
-                model_to_save = model.module if hasattr(model, "module") else model
-                save_checkpoint({
-                    'epoch': epoch + 1,
-                    'state_dict': model_to_save.state_dict(),
-                    'acc': valid_acc,
-                    'best_acc': best_acc,
-                    'optimizer': optimizer.state_dict(),
-                    'scheduler': scheduler.state_dict(),
-                }, is_best, args.out)
+#                 model_to_save = model.module if hasattr(model, "module") else model
+#                 save_checkpoint({
+#                     'epoch': epoch + 1,
+#                     'state_dict': model_to_save.state_dict(),
+#                     'acc': valid_acc,
+#                     'best_acc': best_acc,
+#                     'optimizer': optimizer.state_dict(),
+#                     'scheduler': scheduler.state_dict(),
+#                 }, is_best, args.out)
 
-                valid_accs.append(valid_acc)
-                logger.info('Best top-1 acc: {:.2f}'.format(best_acc))
-                logger.info('Mean top-1 acc: {:.2f}\n'.format(
-                    np.mean(valid_accs[-20:])))
+#                 valid_accs.append(valid_acc)
+#                 logger.info('Best top-1 acc: {:.2f}'.format(best_acc))
+#                 logger.info('Mean top-1 acc: {:.2f}\n'.format(
+#                     np.mean(valid_accs[-20:])))
                     
 
-def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
+def train(args, labeled_trainloader, unlabeled_trainloader, generated_trainloader, valid_loader,
           model, optimizer, ema_model, scheduler, best_acc):
     if args.amp:
         from apex import amp
@@ -211,6 +225,7 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
         losses_x = AverageMeter()
         losses_u = AverageMeter()
         mask_probs = AverageMeter()
+        error_rate = AverageMeter()
 
         if not args.no_progress:
             p_bar = tqdm(range(args.eval_step))
@@ -224,36 +239,56 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
                     labeled_trainloader.sampler.set_epoch(labeled_epoch)
                 labeled_iter = iter(labeled_trainloader)
                 inputs_x, targets_x = next(iter(labeled_iter))
-            try:
-                # week and strong
-                (inputs_u_w, inputs_u_s), _ = next(iter(unlabeled_iter))
-            except:
-                if args.distributed:
-                    unlabeled_epoch += 1
-                    unlabeled_trainloader.sampler.set_epoch(unlabeled_epoch)
-                unlabeled_iter = iter(unlabeled_trainloader)
-                (inputs_u_w, inputs_u_s), _ = next(iter(unlabeled_iter))
-            data_time.update(time.time() - end)
 
-            batch_size = inputs_x.shape[0]
-            inputs = interleave(torch.cat((inputs_x, inputs_u_w, inputs_u_s)), 2*args.mu+1).to(args.device)
-            targets_x = targets_x.to(args.device)
-            logits = model(inputs)
-            logits = de_interleave(logits, 2*args.mu+1)
-            logits_x = logits[:batch_size]
-            logits_u_w, logits_u_s = logits[batch_size:].chunk(2)
-            del logits
+            if not args.semi:
+                data_time.update(time.time() - end)
+                # inputs_x = interleave(inputs_x, 1).to(args.device)
+                inputs_x = inputs_x.to(args.device)
+                targets_x = targets_x.to(args.device)
+                logits_x = model(inputs_x)
 
-            Lx = F.cross_entropy(logits_x, targets_x, reduction='mean')
+                Lx = F.cross_entropy(logits_x, targets_x, reduction='mean')
+                Lu = torch.empty((0, 0))
+                mask = torch.empty((0, 0))
+                error = torch.empty((0, 0))
+                loss = Lx
+            else:
+                try:
+                    # week and strong
+                    (inputs_u_w, inputs_u_s), targets_u = next(iter(unlabeled_iter))
+                except:
+                    if args.distributed:
+                        unlabeled_epoch += 1
+                        unlabeled_trainloader.sampler.set_epoch(unlabeled_epoch)
+                    unlabeled_iter = iter(unlabeled_trainloader)
+                    (inputs_u_w, inputs_u_s), targets_u = next(iter(unlabeled_iter))
+                data_time.update(time.time() - end)
 
-            pseudo_label = torch.softmax(logits_u_w.detach()/args.T, dim=-1)
-            max_probs, targets_u = torch.max(pseudo_label, dim=-1)
-            mask = max_probs.ge(args.threshold).float()
+                batch_size = inputs_x.shape[0]
+                inputs = interleave(torch.cat((inputs_x, inputs_u_w, inputs_u_s)), 2*args.mu+1).to(args.device)
+                targets_x = targets_x.to(args.device)
+                logits = model(inputs)
+                logits = de_interleave(logits, 2*args.mu+1)
+                logits_x = logits[:batch_size]
+                logits_u_w, logits_u_s = logits[batch_size:].chunk(2)
+                del logits
 
-            Lu = (F.cross_entropy(logits_u_s, targets_u, reduction='none') * mask).mean()
+                Lx = F.cross_entropy(logits_x, targets_x, reduction='mean')
 
-            # loss = Lx + args.lambda_u * Lu
-            loss = Lx
+                pseudo_label = torch.softmax(logits_u_w.detach()/args.T, dim=-1)
+                max_probs, targets_u_pseudo = torch.max(pseudo_label, dim=-1)
+                mask = max_probs.ge(args.threshold).float()
+
+                Lu = (F.cross_entropy(logits_u_s, targets_u_pseudo, reduction='none') * mask).mean()
+
+                loss = Lx + args.lambda_u * Lu
+
+                targets_u = targets_u.to(args.device)
+                mask_temp = mask.bool()
+                # print("targets_u_psudo:", targets_u_pseudo[mask_temp])
+                # print("targets_u:", targets_u[mask_temp])
+                error = (targets_u_pseudo[mask_temp] != targets_u[mask_temp]).float()
+                print(epoch, error)
 
             optimizer.zero_grad()
 
@@ -264,8 +299,10 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
                 loss.backward()
 
             losses.update(loss.item())
-            losses_x.update(Lx.item())
-            losses_u.update(Lu.item())
+            if Lx.numel() > 0: losses_x.update(Lx.item())
+            if Lu.numel() > 0: losses_u.update(Lu.item())
+            if error.numel() > 0: error_rate.update(error.mean().item())
+            if mask.numel() > 0: mask_probs.update(mask.mean().item())
             optimizer.step()
             scheduler.step()
             if args.use_ema:
@@ -274,9 +311,9 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
 
             batch_time.update(time.time() - end)
             end = time.time()
-            mask_probs.update(mask.mean().item())
+
             if not args.no_progress:
-                p_bar.set_description("Train Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.4f}. Data: {data:.3f}s. Batch: {bt:.3f}s. Loss: {loss:.4f}. Loss_x: {loss_x:.4f}. Loss_u: {loss_u:.4f}. Mask: {mask:.2f}. ".format(
+                p_bar.set_description("Train Epoch: {epoch}/{epochs:4}. Iter: {batch:4}/{iter:4}. LR: {lr:.4f}. Data: {data:.3f}s. Batch: {bt:.3f}s. Loss: {loss:.4f}. Loss_x: {loss_x:.4f}. Loss_u: {loss_u:.4f}. Mask: {mask:.2f}. Error_rate: {error_rate:.2f}.".format(
                     epoch=epoch + 1,
                     epochs=args.epochs,
                     batch=batch_idx + 1,
@@ -287,7 +324,8 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
                     loss=losses.avg,
                     loss_x=losses_x.avg,
                     loss_u=losses_u.avg,
-                    mask=mask_probs.avg))
+                    mask=mask_probs.avg,
+                    error_rate=error_rate.avg))
                 p_bar.update()
 
         if not args.no_progress:
@@ -297,6 +335,8 @@ def train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader,
             valid_model = ema_model.ema
         else:
             valid_model = model
+
+        test(args, generated_trainloader, valid_model)
 
         if (epoch+1) % 5 == 0:
             if args.distributed == False or args.rank == 0:
@@ -435,8 +475,8 @@ def main(args):
     check_args(args)
     initialize_logging(args)
     model = create_model(args)
-    labeled_dataset, unlabeled_dataset, valid_dataset, test_dataset = load_datasets(args)
-    labeled_trainloader, unlabeled_trainloader, valid_loader, test_loader = create_data_loaders(args, labeled_dataset, unlabeled_dataset, valid_dataset, test_dataset)
+    labeled_dataset, unlabeled_dataset, generated_dataset, valid_dataset, test_dataset = load_datasets(args)
+    labeled_trainloader, unlabeled_trainloader, generated_trainloader, valid_loader, test_loader = create_data_loaders(args, labeled_dataset, unlabeled_dataset, generated_dataset, valid_dataset, test_dataset)
     optimizer = create_optimizer(args, model)
     args.total_steps = args.epochs * len(labeled_dataset)
     args.eval_step = len(labeled_dataset) // (args.batch_size*args.world_size)
@@ -451,10 +491,7 @@ def main(args):
         logger.info(f"  Batch size per GPU = {args.batch_size}")
         logger.info(f"  Total train batch size = {args.batch_size*args.world_size}")
         logger.info(f"  Total optimization steps = {args.total_steps}")
-        if args.semi:
-            train_semi(args, labeled_trainloader, unlabeled_trainloader, valid_loader, model, optimizer, ema_model, scheduler, best_acc)
-        else:
-            train(args, labeled_trainloader, valid_loader, model, optimizer, scheduler, best_acc)
+        train(args, labeled_trainloader, unlabeled_trainloader, generated_trainloader, valid_loader, model, optimizer, ema_model, scheduler, best_acc)
     if args.test:
         logger.info("****************** Running testation ******************")
         logger.info(f"  Task = {args.dataset}@{args.num_labeled}")
