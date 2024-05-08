@@ -46,7 +46,7 @@ def get_cifar10(args, root):
 
     valid_dataset = test_dataset
 
-    return train_labeled_dataset, train_unlabeled_dataset, test_dataset, valid_dataset
+    return train_labeled_dataset, train_unlabeled_dataset, valid_dataset, test_dataset
 
 
 def get_cifar100(args, root):
@@ -82,7 +82,7 @@ def get_cifar100(args, root):
     
     valid_dataset = test_dataset
 
-    return train_labeled_dataset, train_unlabeled_dataset, test_dataset, valid_dataset
+    return train_labeled_dataset, train_unlabeled_dataset, valid_dataset, test_dataset
 
 
 def get_flowers102(args, root):
@@ -104,6 +104,8 @@ def get_flowers102(args, root):
     ])
     if args.one:
         folder = "/vhome/xieyiweng/flowers-102-FixMatch-one"
+    elif args.three:
+        folder = "/vhome/xieyiweng/flowers-102-FixMatch-three"
     else:
         folder = "/vhome/xieyiweng/flowers-102-FixMatch"
     base_dataset_labeled = load_dataset("imagefolder", 
@@ -121,35 +123,188 @@ def get_flowers102(args, root):
     base_dataset_valid = base_dataset_labeled['validation']
     base_dataset_test = base_dataset_labeled['test']
     # train_labeled_idxs, train_unlabeled_idxs = x_u_split(args, base_dataset_train['label'])
-    train_labeled_dataset = FLOWERS102(
+    train_labeled_dataset = HFDataset(
         root, 
         # train_labeled_idxs,
         transform=transform_labeled,
         dataset=base_dataset_train_labeled)
 
-    train_unlabeled_dataset = FLOWERS102(
+    train_unlabeled_dataset = HFDataset(
         root,
         # train_unlabeled_idxs,
         transform=TransformFixMatch_flowers(mean=normal_mean, std=normal_std, size=size),
         dataset=base_dataset_train_unlabeled)
     
-    train_generated_dataset = FLOWERS102(
+    train_generated_dataset = HFDataset(
         root, 
         # train_labeled_idxs,
         transform=transform_labeled,
         dataset=base_dataset_train_generated)
 
-    test_dataset = FLOWERS102(
-        root, 
-        transform=transform_val, 
-        dataset=base_dataset_test)
-    
-    valid_dataset = FLOWERS102(
+    valid_dataset = HFDataset(
         root, 
         transform=transform_val, 
         dataset=base_dataset_valid)
 
-    return train_labeled_dataset, train_unlabeled_dataset, train_generated_dataset, test_dataset, valid_dataset
+    test_dataset = HFDataset(
+        root, 
+        transform=transform_val, 
+        dataset=base_dataset_test)
+
+    return train_labeled_dataset, train_unlabeled_dataset, train_generated_dataset, valid_dataset, test_dataset
+
+
+def get_birds200(args, root):
+    # 128*4 256*1
+    size = 256
+    transform_labeled = transforms.Compose([
+        transforms.Resize((size, size)), 
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomCrop(size=size,
+                              padding=int(size*0.125),
+                              padding_mode='reflect'),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=normal_mean, std=normal_std)
+    ])
+    transform_val = transforms.Compose([
+        transforms.Resize((size, size)), 
+        transforms.ToTensor(),
+        transforms.Normalize(mean=normal_mean, std=normal_std)
+    ])
+
+    folder = "/vhome/xieyiweng/birds-200-FixMatch-test"
+    base_dataset_labeled = load_dataset("imagefolder", 
+                                        data_dir=f"{folder}/birds-200-FixMatch-labeled",
+                                        drop_labels=False)
+    base_dataset_unlabeled = load_dataset("imagefolder",
+                                        data_dir=f"{folder}/birds-200-FixMatch-unlabeled",
+                                        drop_labels=False)
+    base_dataset_generated = load_dataset("imagefolder",
+                                        data_dir=f"{folder}/birds-200-FixMatch-generated",
+                                        drop_labels=False)
+    base_dataset_train_labeled = base_dataset_labeled['train']
+    base_dataset_train_unlabeled = base_dataset_unlabeled['train']
+    base_dataset_train_generated = base_dataset_generated['train']
+    base_dataset_valid = base_dataset_labeled['validation']
+    base_dataset_test = base_dataset_labeled['test']
+    print("len(base_dataset_train_labeled):", len(base_dataset_train_labeled))
+    print("len(base_dataset_train_unlabeled):", len(base_dataset_train_unlabeled))
+    print("len(base_dataset_train_generated):", len(base_dataset_train_generated))
+    print("len(base_dataset_valid):", len(base_dataset_valid))
+    print("len(base_dataset_test):", len(base_dataset_test))
+    # train_labeled_idxs, train_unlabeled_idxs = x_u_split(args, base_dataset_train['label'])
+    train_labeled_dataset = HFDataset(
+        root, 
+        # train_labeled_idxs,
+        transform=transform_labeled,
+        dataset=base_dataset_train_labeled)
+
+    train_unlabeled_dataset = HFDataset(
+        root,
+        # train_unlabeled_idxs,
+        transform=TransformFixMatch_flowers(mean=normal_mean, std=normal_std, size=size),
+        dataset=base_dataset_train_unlabeled)
+    
+    train_generated_dataset = HFDataset(
+        root, 
+        # train_labeled_idxs,
+        transform=transform_labeled,
+        dataset=base_dataset_train_generated)
+    
+    train_generated_dataset = HFDataset(
+        root, 
+        # train_labeled_idxs,
+        transform=transform_labeled,
+        dataset=base_dataset_train_generated)
+
+    valid_dataset = HFDataset(
+        root, 
+        transform=transform_val, 
+        dataset=base_dataset_valid)
+
+    test_dataset = HFDataset(
+        root, 
+        transform=transform_val, 
+        dataset=base_dataset_test)
+
+    return train_labeled_dataset, train_unlabeled_dataset, train_generated_dataset, valid_dataset, test_dataset
+
+
+def get_cars196(args, root):
+    # 128*4 256*1
+    size = 256
+    transform_labeled = transforms.Compose([
+        transforms.Resize((size, size)), 
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomCrop(size=size,
+                              padding=int(size*0.125),
+                              padding_mode='reflect'),
+        transforms.ToTensor(),
+        
+        transforms.Normalize(mean=normal_mean, std=normal_std)
+    ])
+    transform_val = transforms.Compose([
+        transforms.Resize((size, size)), 
+        transforms.ToTensor(),
+        transforms.Normalize(mean=normal_mean, std=normal_std)
+    ])
+
+    folder = "/vhome/xieyiweng/cars-196-FixMatch-test"
+    base_dataset_labeled = load_dataset("imagefolder", 
+                                        data_dir=f"{folder}/cars-196-FixMatch-labeled",
+                                        drop_labels=False)
+    base_dataset_unlabeled = load_dataset("imagefolder",
+                                        data_dir=f"{folder}/cars-196-FixMatch-unlabeled",
+                                        drop_labels=False)
+    base_dataset_generated = load_dataset("imagefolder",
+                                        data_dir=f"{folder}/cars-196-FixMatch-generated",
+                                        drop_labels=False)
+    base_dataset_train_labeled = base_dataset_labeled['train']
+    base_dataset_train_unlabeled = base_dataset_unlabeled['train']
+    base_dataset_train_generated = base_dataset_generated['train']
+    base_dataset_valid = base_dataset_labeled['validation']
+    base_dataset_test = base_dataset_labeled['test']
+    print("len(base_dataset_train_labeled):", len(base_dataset_train_labeled))
+    print("len(base_dataset_train_unlabeled):", len(base_dataset_train_unlabeled))
+    print("len(base_dataset_train_generated):", len(base_dataset_train_generated))
+    print("len(base_dataset_valid):", len(base_dataset_valid))
+    print("len(base_dataset_test):", len(base_dataset_test))
+    # train_labeled_idxs, train_unlabeled_idxs = x_u_split(args, base_dataset_train['label'])
+    train_labeled_dataset = HFDataset(
+        root, 
+        # train_labeled_idxs,
+        transform=transform_labeled,
+        dataset=base_dataset_train_labeled)
+
+    train_unlabeled_dataset = HFDataset(
+        root,
+        # train_unlabeled_idxs,
+        transform=TransformFixMatch_flowers(mean=normal_mean, std=normal_std, size=size),
+        dataset=base_dataset_train_unlabeled)
+    
+    train_generated_dataset = HFDataset(
+        root, 
+        # train_labeled_idxs,
+        transform=transform_labeled,
+        dataset=base_dataset_train_generated)
+    
+    train_generated_dataset = HFDataset(
+        root, 
+        # train_labeled_idxs,
+        transform=transform_labeled,
+        dataset=base_dataset_train_generated)
+
+    valid_dataset = HFDataset(
+        root, 
+        transform=transform_val, 
+        dataset=base_dataset_valid)
+
+    test_dataset = HFDataset(
+        root, 
+        transform=transform_val, 
+        dataset=base_dataset_test)
+
+    return train_labeled_dataset, train_unlabeled_dataset, train_generated_dataset, valid_dataset, test_dataset
 
 
 
@@ -270,7 +425,7 @@ class CIFAR100SSL(datasets.CIFAR100):
 
         return img, target
     
-class FLOWERS102(datasets.VisionDataset):
+class HFDataset(datasets.VisionDataset):
     def __init__(self, root, indexs=None, 
                  transform=None, target_transform=None, dataset=None):
         super().__init__(root, 
@@ -279,7 +434,7 @@ class FLOWERS102(datasets.VisionDataset):
 
         self.data = dataset['image']
         self.targets = dataset['label']
-        
+
         if indexs is not None:
             self.data = [self.data[i] for i in indexs]
             self.targets = [self.targets[i] for i in indexs]
@@ -287,6 +442,11 @@ class FLOWERS102(datasets.VisionDataset):
     def __getitem__(self, index):
         img, target = self.data[index], self.targets[index]
         # img = Image.fromarray(img)
+
+        # 灰度图像！！！！！！！！！！！！！！！！！！！！
+        # 坑死爹了
+        if img.mode == 'L':
+            img = img.convert('RGB')
 
         if self.transform is not None:
             img = self.transform(img)
@@ -302,4 +462,6 @@ class FLOWERS102(datasets.VisionDataset):
 
 DATASET_GETTERS = {'cifar10': get_cifar10,
                    'cifar100': get_cifar100,
-                   'flowers102': get_flowers102}
+                   'flowers102': get_flowers102,
+                   'birds200': get_birds200,
+                   'cars196': get_cars196}
